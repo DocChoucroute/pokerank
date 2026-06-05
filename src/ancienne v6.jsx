@@ -1028,24 +1028,6 @@ function PokedexView() {
   );
 }
 
-// ── useLayout hook ────────────────────────────────────────────────────────────
-function useLayout() {
-  const [layout, setLayout] = useState(() => {
-    const w = window.innerWidth, h = window.innerHeight;
-    return { mobile: w < 768, portrait: h > w };
-  });
-  useEffect(() => {
-    const update = () => {
-      const w = window.innerWidth, h = window.innerHeight;
-      setLayout({ mobile: w < 768, portrait: h > w });
-    };
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-    return () => { window.removeEventListener("resize", update); window.removeEventListener("orientationchange", update); };
-  }, []);
-  return layout;
-}
-
 // ── TINDER VIEW ──────────────────────────────────────────────────────────────
 function TinderView({ data, setData }) {
   const [left, setLeft] = useState(null);
@@ -1053,11 +1035,10 @@ function TinderView({ data, setData }) {
   const [loading, setLoading] = useState(true);
   const [swipeAnim, setSwipeAnim] = useState(null);
   const [swipeLabel, setSwipeLabel] = useState(null);
+  // Undo stack: each entry = { left, right, prevData }
   const [undoStack, setUndoStack] = useState([]);
   const [undoFlash, setUndoFlash] = useState(false);
   const touchStart = useRef(null);
-  const { mobile, portrait } = useLayout();
-  const isVertical = mobile && portrait;
 
   const loadPair = useCallback(async (d) => {
     setLoading(true);
@@ -1074,7 +1055,10 @@ function TinderView({ data, setData }) {
     const dir = winner==="left"?"left":winner==="right"?"right":"up";
     const label = winner==="left"?`${left.name} gagne !`:winner==="right"?`${right.name} gagne !`:"Égalité !";
     setSwipeAnim(dir); setSwipeLabel(label);
+
+    // Save snapshot for undo BEFORE updating
     const snapshot = { left, right, prevData: data };
+
     const newElos = { ...data.elos };
     const eloL = newElos[left.id]||INITIAL_ELO, eloR = newElos[right.id]||INITIAL_ELO;
     const scoreL = winner==="left"?1:winner==="right"?0:0.5;
@@ -1083,7 +1067,8 @@ function TinderView({ data, setData }) {
     const newData = { ...data, elos:newElos, matches:data.matches+1,
       history:[{l:left.id,r:right.id,w:winner,ts:Date.now()},...data.history.slice(0,499)] };
     setData(newData);
-    setUndoStack(prev => [...prev.slice(-19), snapshot]);
+    setUndoStack(prev => [...prev.slice(-19), snapshot]); // keep last 20
+
     setTimeout(async () => { setSwipeAnim(null); setSwipeLabel(null); await loadPair(newData); }, 400);
   }, [left,right,data,swipeAnim,loadPair,setData]);
 
@@ -1092,8 +1077,10 @@ function TinderView({ data, setData }) {
     const last = undoStack[undoStack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
     setData(last.prevData);
-    setLeft(last.left); setRight(last.right);
+    setLeft(last.left);
+    setRight(last.right);
     setSwipeLabel(null);
+    // Flash feedback
     setUndoFlash(true);
     setTimeout(() => setUndoFlash(false), 600);
   }, [undoStack, swipeAnim, setData]);
@@ -1121,179 +1108,310 @@ function TinderView({ data, setData }) {
   }, [vote, undo]);
 
   const phase = data.matches<20?"Découverte":data.matches<60?"Calibrage":"Affinage";
-
-  const getSwipeStyle = (side) => {
-    if (!swipeAnim) return {};
-    if (swipeAnim==="up") return { transform:"translateY(-140%)", opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)" };
-    if (swipeAnim==="left"  && side==="left")  return { transform:"translateX(-140%) rotate(-15deg)", opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)" };
-    if (swipeAnim==="right" && side==="right") return { transform:"translateX(140%) rotate(15deg)",  opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)" };
-    return {};
+  const cardSwipe = (side) => {
+    if (side==="left") return swipeAnim==="left"?"left":null;
+    return swipeAnim==="right"?"right":swipeAnim==="up"?"up":null;
   };
-
-  const cardW   = isVertical ? Math.min(window.innerWidth - 48, 320) : mobile ? 160 : 240;
-  const spriteS = isVertical ? 120 : mobile ? 90 : 150;
 
   const DuelCard = ({ poke, side }) => {
     const tc = poke?(TYPE_COLORS[poke.types?.[0]]||TYPE_COLORS.normal):TYPE_COLORS.normal;
+    const sd = cardSwipe(side);
+    const swipeStyle = sd ? {
+      transform: sd==="left"?"translateX(-120%) rotate(-15deg)":sd==="right"?"translateX(120%) rotate(15deg)":"translateY(-120%)",
+      opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)",
+    } : {};
     return (
-      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-        <div style={{ fontSize:11, color:"#A89FC0", fontWeight:600, letterSpacing:"0.06em" }}>
-          {isVertical
-            ? (side==="left" ? "↑ HAUT" : "↓ BAS")
-            : (side==="left" ? "← GAUCHE" : "DROITE →")}
+      <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:8 }}>
+        <div style={{ fontSize:11,color:"#A89FC0",fontWeight:600,letterSpacing:"0.06em" }}>
+          {side==="left"?"← GAUCHE":"DROITE →"}
         </div>
         <div onClick={()=>vote(side)}
-          style={{ width:cardW, background:"#fff", borderRadius:20,
-            border:"2.5px solid #E8E4F0", padding: mobile?"14px 12px 18px":"20px 16px 24px",
-            cursor:"pointer", transition:"border-color 0.2s,box-shadow 0.2s",
-            boxShadow:"0 4px 20px rgba(0,0,0,0.08)", display:"flex", flexDirection:"column",
-            alignItems:"center", gap: mobile?8:12, userSelect:"none",
-            ...getSwipeStyle(side) }}
+          style={{ width:240,background:"#fff",borderRadius:24,border:`2.5px solid #E8E4F0`,
+            padding:"20px 16px 24px",cursor:"pointer",transition:"border-color 0.2s,box-shadow 0.2s",
+            boxShadow:"0 4px 20px rgba(0,0,0,0.08)",display:"flex",flexDirection:"column",
+            alignItems:"center",gap:12,userSelect:"none",...swipeStyle }}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=tc.bg;e.currentTarget.style.boxShadow=`0 16px 48px ${tc.bg}30`;}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor="#E8E4F0";e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.08)";}}>
-          <div style={{ width:spriteS, height:spriteS, borderRadius:16, background:tc.light,
-            display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
-            {poke?.sprite
-              ? <img src={poke.sprite} alt={poke.name} style={{ width:"85%", height:"85%", objectFit:"contain" }} />
-              : <div style={{ fontSize:36, color:"#ccc" }}>?</div>}
+          <div style={{ width:150,height:150,borderRadius:20,background:tc.light,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden" }}>
+            {poke?.sprite?<img src={poke.sprite} alt={poke.name} style={{ width:"85%",height:"85%",objectFit:"contain" }} />:<div style={{ fontSize:48,color:"#ccc" }}>?</div>}
           </div>
-          <div style={{ fontSize:10, color:"#A89FC0", fontWeight:600, letterSpacing:"0.08em" }}>
-            #{String(poke?.id||"").padStart(4,"0")}
-          </div>
-          <div style={{ fontSize:mobile?15:20, fontWeight:700, color:"#1A1025", textAlign:"center", lineHeight:1.2 }}>
-            {poke?.name||"…"}
-          </div>
-          <div style={{ display:"flex", gap:5, flexWrap:"wrap", justifyContent:"center" }}>
-            {poke?.types?.map(t=><TypeBadge key={t} type={t} />)}
-          </div>
-          <div style={{ fontSize:10, color:"#A89FC0", fontWeight:500 }}>Gen {poke?.gen}</div>
+          <div style={{ fontSize:11,color:"#A89FC0",fontWeight:600,letterSpacing:"0.08em" }}>#{String(poke?.id||"").padStart(4,"0")}</div>
+          <div style={{ fontSize:20,fontWeight:700,color:"#1A1025",textAlign:"center",lineHeight:1.2 }}>{poke?.name||"…"}</div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center" }}>{poke?.types?.map(t=><TypeBadge key={t} type={t} />)}</div>
+          <div style={{ fontSize:11,color:"#A89FC0",fontWeight:500 }}>Génération {poke?.gen}</div>
         </div>
       </div>
     );
   };
 
-  const phasebar = (
-    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-      <div style={{ fontSize:12, color:"#A89FC0", fontWeight:500 }}>
-        {data.matches} duels · <span style={{ color:"#6C4FDF", fontWeight:700 }}>{phase}</span>
-      </div>
-      <div style={{ width:80, height:4, background:"#F0EDF8", borderRadius:4, overflow:"hidden" }}>
-        <div style={{ height:"100%", width:`${Math.min(100,(data.matches/60)*100)}%`,
-          background:"linear-gradient(90deg,#6C4FDF,#FF5F8A)", borderRadius:4 }} />
-      </div>
-    </div>
-  );
-
-  const statusLabel = (
-    <div style={{ height:20, textAlign:"center" }}>
-      {undoFlash
-        ? <span style={{ fontSize:13, fontWeight:700, color:"#F7CE00" }}>↩ Duel annulé</span>
-        : swipeLabel
-          ? <span style={{ fontSize:14, fontWeight:700, color:"#6C4FDF" }}>{swipeLabel}</span>
-          : null}
-    </div>
-  );
-
-  const vsCenter_landscape = (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap: mobile?8:12, flexShrink:0 }}>
-      <button onClick={()=>vote("draw")} style={{
-        background:"#F5F3FF", border:"1.5px solid #C9C0E8", borderRadius:12,
-        padding: mobile?"8px 10px":"10px 18px",
-        cursor:"pointer", fontSize: mobile?11:12, fontWeight:700, color:"#6C4FDF" }}>
-        ↑ Hésit.
-      </button>
-      <div style={{ fontSize:mobile?16:22, fontWeight:800, color:"#D0C8E8" }}>VS</div>
-      <button onClick={undo} disabled={undoStack.length===0} style={{
-        background: undoStack.length===0?"#FAFAF8":"#FFFBEC",
-        border:`1.5px solid ${undoStack.length===0?"#F0EDF8":"#F7CE0080"}`,
-        borderRadius:12, padding: mobile?"8px 10px":"10px 18px",
-        cursor: undoStack.length===0?"default":"pointer",
-        fontSize: mobile?11:12, fontWeight:700,
-        color: undoStack.length===0?"#D0C8E8":"#B8960A",
-        opacity: undoStack.length===0?0.5:1 }}>
-        ↓ Annuler
-      </button>
-    </div>
-  );
-
-  const actionButtons_portrait = (
-    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-      <button onClick={undo} disabled={undoStack.length===0} style={{
-        background: undoStack.length===0?"#FAFAF8":"#FFFBEC",
-        border:`1.5px solid ${undoStack.length===0?"#F0EDF8":"#F7CE0080"}`,
-        borderRadius:12, padding:"10px 20px",
-        cursor: undoStack.length===0?"default":"pointer",
-        fontSize:13, fontWeight:700,
-        color: undoStack.length===0?"#D0C8E8":"#B8960A",
-        opacity: undoStack.length===0?0.5:1 }}>
-        ↓ Annuler
-      </button>
-      <button onClick={()=>vote("draw")} style={{
-        background:"#F5F3FF", border:"1.5px solid #C9C0E8", borderRadius:12,
-        padding:"10px 20px", cursor:"pointer", fontSize:13, fontWeight:700, color:"#6C4FDF" }}>
-        ↑ Hésitation
-      </button>
-    </div>
-  );
-
-  // ── PORTRAIT MOBILE ───────────────────────────────────────────────────────
-  if (isVertical) {
-    return (
-      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
-        style={{ display:"flex", flexDirection:"column", alignItems:"center",
-          padding:"16px 16px 24px", gap:10, minHeight:"calc(100vh - 116px)" }}>
-        {phasebar}
-        {statusLabel}
-        {loading ? (
-          <>
-            <div style={{ width:cardW, height:200, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />
-            <div style={{ width:cardW, height:200, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />
-          </>
-        ) : (
-          <>
-            <DuelCard poke={left}  side="left"  />
-            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <div style={{ width:40, height:1, background:"#E8E4F0" }} />
-              <span style={{ fontSize:16, fontWeight:800, color:"#D0C8E8" }}>VS</span>
-              <div style={{ width:40, height:1, background:"#E8E4F0" }} />
-            </div>
-            <DuelCard poke={right} side="right" />
-          </>
-        )}
-        {actionButtons_portrait}
-        <div style={{ fontSize:11, color:"#C0B8D8", textAlign:"center" }}>
-          Swipe ← → choisir · ↑ hésiter · ↓ annuler
-        </div>
-        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
-      </div>
-    );
-  }
-
-  // ── LANDSCAPE (desktop or mobile landscape) ───────────────────────────────
   return (
     <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
-      style={{ display:"flex", flexDirection:"column", alignItems:"center",
-        padding: mobile?"16px 8px":"32px 20px", gap: mobile?14:28,
-        minHeight: mobile?"calc(100vh - 110px)":500 }}>
-      {phasebar}
-      {statusLabel}
+      style={{ display:"flex",flexDirection:"column",alignItems:"center",padding:"32px 20px",gap:28,minHeight:500 }}>
+
+      {/* Phase bar */}
+      <div style={{ display:"flex",alignItems:"center",gap:16 }}>
+        <div style={{ fontSize:13,color:"#A89FC0",fontWeight:500 }}>
+          {data.matches} duels · Phase : <span style={{ color:"#6C4FDF",fontWeight:700 }}>{phase}</span>
+        </div>
+        <div style={{ width:120,height:4,background:"#F0EDF8",borderRadius:4,overflow:"hidden" }}>
+          <div style={{ height:"100%",width:`${Math.min(100,(data.matches/60)*100)}%`,
+            background:"linear-gradient(90deg,#6C4FDF,#FF5F8A)",borderRadius:4,transition:"width 0.5s" }} />
+        </div>
+      </div>
+
+      {/* Status label */}
+      <div style={{ height:24 }}>
+        {undoFlash
+          ? <div style={{ fontSize:14,fontWeight:700,color:"#F7CE00",animation:"fadeIn 0.15s ease" }}>↩ Duel annulé</div>
+          : swipeLabel
+            ? <div style={{ fontSize:16,fontWeight:700,color:"#6C4FDF",animation:"fadeIn 0.2s ease" }}>{swipeLabel}</div>
+            : null}
+      </div>
+
+      {/* Battle area */}
       {loading ? (
-        <div style={{ display:"flex", gap: mobile?12:32, alignItems:"center" }}>
-          {[0,1].map(i=><div key={i} style={{ width:cardW, height:mobile?220:320, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />)}
+        <div style={{ display:"flex",gap:32,alignItems:"center" }}>
+          {[0,1].map(i=><div key={i} style={{ width:240,height:320,borderRadius:24,background:"#F5F3FF",animation:"pulse 1.2s infinite" }} />)}
         </div>
       ) : (
-        <div style={{ display:"flex", gap: mobile?12:32, alignItems:"center" }}>
+        <div style={{ display:"flex",gap:32,alignItems:"center" }}>
           <DuelCard poke={left}  side="left"  />
-          {vsCenter_landscape}
+
+          {/* Center column */}
+          <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:12,flexShrink:0 }}>
+            <button onClick={()=>vote("draw")} style={{
+              background:"#F5F3FF",border:"1.5px solid #C9C0E8",borderRadius:14,
+              padding:"10px 18px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#6C4FDF",
+              transition:"all 0.15s" }}>
+              ↑ Hésitation
+            </button>
+            <div style={{ fontSize:22,fontWeight:800,color:"#D0C8E8" }}>VS</div>
+            <button onClick={undo} disabled={undoStack.length===0}
+              title="Annuler le dernier duel (↓)"
+              style={{
+                background: undoStack.length===0?"#FAFAF8":"#FFFBEC",
+                border:`1.5px solid ${undoStack.length===0?"#F0EDF8":"#F7CE0080"}`,
+                borderRadius:14, padding:"10px 18px", cursor: undoStack.length===0?"default":"pointer",
+                fontSize:12, fontWeight:700,
+                color: undoStack.length===0?"#D0C8E8":"#B8960A",
+                transition:"all 0.15s", opacity: undoStack.length===0?0.5:1,
+              }}>
+              ↓ Annuler
+            </button>
+          </div>
+
           <DuelCard poke={right} side="right" />
         </div>
       )}
-      {!mobile && (
-        <div style={{ fontSize:12, color:"#C0B8D8", textAlign:"center" }}>
-          Clic sur la carte · ← → ↑ ↓ · Swipe sur mobile
+
+      {/* Hint */}
+      <div style={{ fontSize:12,color:"#C0B8D8",textAlign:"center" }}>
+        Clic sur la carte · ← → ↑ ↓ · Swipe sur mobile
+      </div>
+
+      <style>{`
+        @keyframes fadeIn{from{opacity:0;transform:scale(0.9);}to{opacity:1;transform:scale(1);}}
+        @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.5;}}
+      `}</style>
+    </div>
+  );
+}
+
+// ── RANKING VIEW ─────────────────────────────────────────────────────────────
+function RankingView({ data, onReset, onImport }) {
+  const [genFilter, setGenFilter] = useState(0);
+  const [pokeData, setPokeData] = useState({});
+  const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [exportCount, setExportCount] = useState(null);
+  const fileInputRef = useRef(null);
+  const PER_PAGE = 25;
+
+  const rankedIds = Object.entries(data.elos).sort((a,b)=>b[1]-a[1]).map(([id])=>parseInt(id));
+
+  useEffect(() => {
+    if (!rankedIds.length) return;
+    const toLoad = rankedIds.filter(id=>!pokeData[id]);
+    Promise.all(toLoad.map(id=>fetchPoke(id))).then(results => {
+      const nd={...pokeData}; results.forEach(p=>{if(p)nd[p.id]=p;}); setPokeData(nd);
+    });
+  }, [data.elos]);
+
+  const filtered = rankedIds.filter(id => genFilter===0||(pokeData[id]?.gen||getGen(id))===genFilter);
+  const paginated = filtered.slice(page*PER_PAGE,(page+1)*PER_PAGE);
+  const maxElo = data.elos[rankedIds[0]]||INITIAL_ELO;
+  const minElo = data.elos[rankedIds[rankedIds.length-1]]||INITIAL_ELO;
+  const eloRange = maxElo-minElo||1;
+
+  const handleExport = async (count) => {
+    setExporting(true); setExportCount(count);
+    const top = filtered.slice(0,count);
+    const missing = top.filter(id=>!pokeData[id]);
+    let fullData = pokeData;
+    if (missing.length) {
+      const results = await Promise.all(missing.map(id=>fetchPoke(id)));
+      const nd={...pokeData}; results.forEach(p=>{if(p)nd[p.id]=p;});
+      setPokeData(nd); fullData=nd;
+    }
+    const title = genFilter===0?`Top ${count}`:`Top ${count} — Gen ${genFilter}`;
+    await exportRankingImage(top, fullData, data.elos, title, data.matches);
+    setExporting(false); setExportCount(null);
+  };
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download="pokerank-classement.json"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importJSON = (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!parsed.elos || parsed.matches==null) { alert("Fichier invalide."); return; }
+        onImport(parsed);
+        alert(`✅ Importé ! ${parsed.matches} duels récupérés.`);
+      } catch { alert("Erreur de lecture du fichier."); }
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  };
+
+  return (
+    <div style={{ padding:"32px 24px" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:12 }}>
+        <div>
+          <div style={{ fontSize:22,fontWeight:800,color:"#1A1025" }}>Classement ELO</div>
+          <div style={{ fontSize:13,color:"#A89FC0",marginTop:4 }}>
+            {rankedIds.length} Pokémon classés · {data.matches} duels joués
+            {data.matches<20&&<span style={{ color:"#FF9F43",marginLeft:8 }}>⚠ Calibrage en cours</span>}
+          </div>
+        </div>
+        <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+          {filtered.length>=10&&(
+            <button onClick={()=>handleExport(10)} disabled={exporting}
+              style={{ padding:"8px 14px",borderRadius:10,cursor:"pointer",
+                border:"1.5px solid #6C4FDF",background:exporting&&exportCount===10?"#6C4FDF":"#F5F3FF",
+                color:exporting&&exportCount===10?"#fff":"#6C4FDF",
+                fontSize:12,fontWeight:700,opacity:exporting?0.7:1 }}>
+              {exporting&&exportCount===10?"⏳…":"📸 Top 10"}
+            </button>
+          )}
+          {filtered.length>=50&&(
+            <button onClick={()=>handleExport(50)} disabled={exporting}
+              style={{ padding:"8px 14px",borderRadius:10,cursor:"pointer",
+                border:"1.5px solid #6C4FDF",background:exporting&&exportCount===50?"#6C4FDF":"#F5F3FF",
+                color:exporting&&exportCount===50?"#fff":"#6C4FDF",
+                fontSize:12,fontWeight:700,opacity:exporting?0.7:1 }}>
+              {exporting&&exportCount===50?"⏳…":"📸 Top 50"}
+            </button>
+          )}
+          <button onClick={exportJSON}
+            style={{ padding:"8px 14px",borderRadius:10,cursor:"pointer",
+              border:"1.5px solid #3DB35E",background:"#F0FBF4",
+              color:"#3DB35E",fontSize:12,fontWeight:700 }}>
+            ⬇ Exporter
+          </button>
+          <button onClick={()=>fileInputRef.current?.click()}
+            style={{ padding:"8px 14px",borderRadius:10,cursor:"pointer",
+              border:"1.5px solid #4A9FFF",background:"#F0F8FF",
+              color:"#4A9FFF",fontSize:12,fontWeight:700 }}>
+            ⬆ Importer
+          </button>
+          <input ref={fileInputRef} type="file" accept=".json" onChange={importJSON} style={{ display:"none" }} />
+          <button onClick={onReset}
+            style={{ padding:"8px 14px",borderRadius:10,cursor:"pointer",
+              border:"1.5px solid #FFCDD2",background:"#FFF5F5",
+              color:"#C94D27",fontSize:12,fontWeight:700 }}>
+            🗑 Réinitialiser
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:24 }}>
+        {[0,...GENERATIONS.map(g=>g.id)].map(g=>(
+          <button key={g} onClick={()=>{setGenFilter(g);setPage(0);}} style={{
+            padding:"6px 14px",borderRadius:20,
+            border:genFilter===g?"2px solid #6C4FDF":"1.5px solid #E8E4F0",
+            background:genFilter===g?"#6C4FDF":"#fff",
+            color:genFilter===g?"#fff":"#6C4FDF",
+            fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s",
+          }}>{g===0?"Tous":`Gen ${g}`}</button>
+        ))}
+      </div>
+
+      {filtered.length===0?(
+        <div style={{ textAlign:"center",color:"#A89FC0",padding:"60px 0",fontSize:15 }}>
+          Aucun Pokémon classé pour cette génération.<br/>
+          <span style={{ fontSize:13 }}>Jouez des duels dans le mode Tinder !</span>
+        </div>
+      ):(
+        <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+          {paginated.map(id=>{
+            const globalRank=filtered.indexOf(id)+1;
+            const elo=data.elos[id]||INITIAL_ELO;
+            const poke=pokeData[id];
+            const barWidth=((elo-minElo)/eloRange)*100;
+            const tc=poke?(TYPE_COLORS[poke.types?.[0]]||TYPE_COLORS.normal):TYPE_COLORS.normal;
+            const medal=globalRank===1?"🥇":globalRank===2?"🥈":globalRank===3?"🥉":null;
+            return (
+              <div key={id} style={{ display:"flex",alignItems:"center",gap:16,padding:"10px 16px",borderRadius:14,
+                background:globalRank<=3?`${tc.light}60`:"#FAFAF8",
+                border:`1.5px solid ${globalRank<=3?tc.bg+"40":"#F0EDF8"}` }}>
+                <div style={{ width:36,textAlign:"center",fontSize:14,fontWeight:800,
+                  color:globalRank<=3?tc.bg:"#A89FC0" }}>{medal||`#${globalRank}`}</div>
+                <div style={{ width:44,height:44,borderRadius:10,background:tc.light,
+                  display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                  {poke?.sprite
+                    ?<img src={poke.sprite} alt={poke.name} style={{ width:36,height:36,objectFit:"contain" }} />
+                    :<div style={{ width:24,height:24,borderRadius:6,background:"#E8E4F0",animation:"pulse 1.2s infinite" }} />}
+                </div>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontSize:14,fontWeight:700,color:"#1A1025" }}>{poke?.name||`#${id}`}</div>
+                  <div style={{ display:"flex",gap:4,marginTop:3 }}>
+                    {poke?.types?.map(t=><TypeBadge key={t} type={t} />)||
+                      <div style={{ height:16,width:40,borderRadius:8,background:"#F0EDF8" }} />}
+                  </div>
+                </div>
+                <div style={{ width:160,display:"flex",flexDirection:"column",gap:4,flexShrink:0 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between" }}>
+                    <span style={{ fontSize:11,color:"#A89FC0",fontWeight:500 }}>ELO</span>
+                    <span style={{ fontSize:13,fontWeight:700,color:tc.bg }}>{elo}</span>
+                  </div>
+                  <div style={{ height:6,background:"#F0EDF8",borderRadius:3,overflow:"hidden" }}>
+                    <div style={{ height:"100%",width:`${barWidth}%`,
+                      background:`linear-gradient(90deg,${tc.bg}90,${tc.bg})`,borderRadius:3 }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
+
+      {filtered.length>PER_PAGE&&(
+        <div style={{ display:"flex",justifyContent:"center",gap:12,marginTop:24 }}>
+          <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0}
+            style={{ padding:"8px 18px",borderRadius:10,border:"1.5px solid #E8E4F0",
+              background:"#fff",cursor:"pointer",fontSize:13,color:"#6C4FDF",opacity:page===0?0.4:1 }}>
+            ← Précédent
+          </button>
+          <span style={{ fontSize:13,color:"#A89FC0",padding:"8px 0" }}>
+            {page+1} / {Math.ceil(filtered.length/PER_PAGE)}
+          </span>
+          <button onClick={()=>setPage(p=>Math.min(Math.ceil(filtered.length/PER_PAGE)-1,p+1))}
+            disabled={page>=Math.ceil(filtered.length/PER_PAGE)-1}
+            style={{ padding:"8px 18px",borderRadius:10,border:"1.5px solid #E8E4F0",
+              background:"#fff",cursor:"pointer",fontSize:13,color:"#6C4FDF",
+              opacity:page>=Math.ceil(filtered.length/PER_PAGE)-1?0.4:1 }}>
+            Suivant →
+          </button>
+        </div>
+      )}
+      <style>{`@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.5;}}`}</style>
     </div>
   );
 }
@@ -1303,8 +1421,8 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("pokedex");
   const [showReset, setShowReset] = useState(false);
-  const { mobile } = useLayout();
 
+  // Auto-login if last active profile exists
   useEffect(() => {
     const lastId = loadActiveId();
     if (lastId) {
@@ -1323,106 +1441,75 @@ export default function App() {
   };
 
   const handleImport = (importedData) => setData(importedData);
-  const handleReset  = () => setShowReset(true);
+
+  const handleReset = () => setShowReset(true);
   const confirmReset = () => { setData(emptyData()); setShowReset(false); };
+
   const handleLogout = () => { saveActiveId(""); setProfile(null); setTab("pokedex"); };
 
   if (!profile) return <WelcomeScreen onLogin={setProfile} />;
 
   const tabs = [
-    { id:"pokedex",  label:"Pokédex",   icon:"📖" },
-    { id:"tinder",   label:"Duels",     icon:"⚔️"  },
-    { id:"ranking",  label:"Classement",icon:"🏆"  },
+    { id:"pokedex", label:"Pokédex", icon:"📖" },
+    { id:"tinder",  label:"Duels",   icon:"⚔️"  },
+    { id:"ranking", label:"Classement", icon:"🏆" },
   ];
 
   return (
-    <div style={{ minHeight:"100vh", background:"#F8F6FF",
-      fontFamily:"'Nunito','Segoe UI',sans-serif",
-      paddingBottom: mobile ? 64 : 0 }}>
+    <div style={{ minHeight:"100vh", background:"#F8F6FF", fontFamily:"'Nunito','Segoe UI',sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {showReset && <ResetModal matchCount={data.matches} onConfirm={confirmReset} onCancel={()=>setShowReset(false)} />}
 
-      {/* ── TOP HEADER ── */}
-      <div style={{ background:"#fff", borderBottom:"1.5px solid #F0EDF8",
-        padding: mobile?"0 16px":"0 24px",
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        height: mobile?52:60, position:"sticky", top:0, zIndex:100 }}>
-
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <div style={{ width:28, height:28, borderRadius:8,
+      {/* Header */}
+      <div style={{ background:"#fff", borderBottom:"1.5px solid #F0EDF8", padding:"0 24px",
+        display:"flex", alignItems:"center", justifyContent:"space-between", height:60,
+        position:"sticky", top:0, zIndex:100 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+          <div style={{ width:32,height:32,borderRadius:10,
             background:"linear-gradient(135deg,#6C4FDF,#FF5F8A)",
-            display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚡</div>
-          <span style={{ fontSize:mobile?15:18, fontWeight:900, color:"#1A1025", letterSpacing:"-0.02em" }}>
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>⚡</div>
+          <span style={{ fontSize:18,fontWeight:900,color:"#1A1025",letterSpacing:"-0.02em" }}>
             Poké<span style={{ color:"#6C4FDF" }}>Rank</span>
           </span>
         </div>
-
-        {/* Desktop nav */}
-        {!mobile && (
-          <div style={{ display:"flex", gap:4 }}>
-            {tabs.map(t=>(
-              <button key={t.id} onClick={()=>setTab(t.id)} style={{
-                padding:"7px 18px", borderRadius:10, border:"none",
-                background:tab===t.id?"#6C4FDF":"transparent",
-                color:tab===t.id?"#fff":"#A89FC0",
-                fontSize:13, fontWeight:700, cursor:"pointer", transition:"all 0.15s",
-                display:"flex", alignItems:"center", gap:6 }}>
-                <span>{t.icon}</span><span>{t.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
+        <div style={{ display:"flex",gap:4 }}>
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{
+              padding:"7px 18px",borderRadius:10,border:"none",
+              background:tab===t.id?"#6C4FDF":"transparent",
+              color:tab===t.id?"#fff":"#A89FC0",
+              fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.15s",
+              display:"flex",alignItems:"center",gap:6 }}>
+              <span>{t.icon}</span><span>{t.label}</span>
+            </button>
+          ))}
+        </div>
         {/* Profile badge */}
-        <div style={{ display:"flex", alignItems:"center", gap: mobile?6:10 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 10px",
-            borderRadius:20, background:"#F5F3FF", border:"1.5px solid #E8E4F0" }}>
-            <div style={{ width:20, height:20, borderRadius:6,
+        <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,padding:"5px 12px",
+            borderRadius:20,background:"#F5F3FF",border:"1.5px solid #E8E4F0" }}>
+            <div style={{ width:22,height:22,borderRadius:6,
               background:"linear-gradient(135deg,#6C4FDF,#FF5F8A)",
-              display:"flex", alignItems:"center", justifyContent:"center",
-              fontSize:10, fontWeight:800, color:"#fff" }}>
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:11,fontWeight:800,color:"#fff" }}>
               {profile.name.charAt(0).toUpperCase()}
             </div>
-            {!mobile && <span style={{ fontSize:12, fontWeight:700, color:"#4A3F6B" }}>{profile.name}</span>}
+            <span style={{ fontSize:12,fontWeight:700,color:"#4A3F6B" }}>{profile.name}</span>
           </div>
-          <button onClick={handleLogout} style={{ background:"none",
-            border:"1.5px solid #E8E4F0", borderRadius:8,
-            padding:"4px 8px", cursor:"pointer",
-            fontSize:11, color:"#A89FC0", fontWeight:600 }}>
-            {mobile ? "↩" : "Changer"}
+          <button onClick={handleLogout} title="Changer de profil"
+            style={{ background:"none",border:"1.5px solid #E8E4F0",borderRadius:8,
+              padding:"5px 10px",cursor:"pointer",fontSize:11,color:"#A89FC0",fontWeight:600 }}>
+            Changer
           </button>
         </div>
       </div>
 
-      {/* ── CONTENT ── */}
-      <div style={{ maxWidth: mobile?"100%":960, margin:"0 auto" }}>
-        {tab==="pokedex"  && <PokedexView />}
-        {tab==="tinder"   && <TinderView data={data} setData={setData} />}
-        {tab==="ranking"  && <RankingView data={data} onReset={handleReset} onImport={handleImport} />}
+      <div style={{ maxWidth:960,margin:"0 auto" }}>
+        {tab==="pokedex" && <PokedexView />}
+        {tab==="tinder"  && <TinderView data={data} setData={setData} />}
+        {tab==="ranking" && <RankingView data={data} onReset={handleReset} onImport={handleImport} />}
       </div>
-
-      {/* ── BOTTOM NAV (mobile only) ── */}
-      {mobile && (
-        <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100,
-          background:"#fff", borderTop:"1.5px solid #F0EDF8",
-          display:"flex", height:64, boxShadow:"0 -4px 20px rgba(0,0,0,0.06)" }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={()=>setTab(t.id)}
-              style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-                justifyContent:"center", gap:3, border:"none", background:"transparent",
-                cursor:"pointer", transition:"color 0.15s", position:"relative",
-                color: tab===t.id?"#6C4FDF":"#A89FC0" }}>
-              <span style={{ fontSize:22 }}>{t.icon}</span>
-              <span style={{ fontSize:10, fontWeight:700 }}>{t.label}</span>
-              {tab===t.id && (
-                <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)",
-                  width:36, height:3, background:"#6C4FDF", borderRadius:"0 0 3px 3px" }} />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
