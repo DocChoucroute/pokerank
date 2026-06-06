@@ -1140,6 +1140,11 @@ function TinderView({ data, setData }) {
     const tc = poke?(TYPE_COLORS[poke.types?.[0]]||TYPE_COLORS.normal):TYPE_COLORS.normal;
     return (
       <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+        <div style={{ fontSize:11, color:"#A89FC0", fontWeight:600, letterSpacing:"0.06em" }}>
+          {isVertical
+            ? (side==="left" ? "↑ HAUT" : "↓ BAS")
+            : (side==="left" ? "← GAUCHE" : "DROITE →")}
+        </div>
         <div onClick={()=>vote(side)} style={{
           width:cardW, background:"#fff", borderRadius:20,
           border:"2.5px solid #E8E4F0", padding:mobile?"12px 10px 16px":"20px 16px 24px",
@@ -1302,7 +1307,6 @@ function TinderView({ data, setData }) {
 }
 // ── RANKING VIEW ─────────────────────────────────────────────────────────────
 function RankingView({ data, onReset, onImport }) {
-  const { mobile } = useLayout();
   const [genFilter, setGenFilter] = useState(0);
   const [pokeData, setPokeData] = useState({});
   const [page, setPage] = useState(0);
@@ -1471,17 +1475,15 @@ function RankingView({ data, onReset, onImport }) {
                       <div style={{ height:16, width:40, borderRadius:8, background:"#F0EDF8" }} />}
                   </div>
                 </div>
-                <div style={{ width:mobile?60:160, display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
+                <div style={{ width:160, display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
                   <div style={{ display:"flex", justifyContent:"space-between" }}>
-                    <span style={{ fontSize:11, color:"#A89FC0", fontWeight:500 }}>{mobile?"":"ELO"}</span>
+                    <span style={{ fontSize:11, color:"#A89FC0", fontWeight:500 }}>ELO</span>
                     <span style={{ fontSize:13, fontWeight:700, color:tc.bg }}>{elo}</span>
                   </div>
-                  {!mobile && (
                   <div style={{ height:6, background:"#F0EDF8", borderRadius:3, overflow:"hidden" }}>
                     <div style={{ height:"100%", width:`${barWidth}%`,
                       background:`linear-gradient(90deg,${tc.bg}90,${tc.bg})`, borderRadius:3 }} />
                   </div>
-                  )}
                 </div>
               </div>
             );
