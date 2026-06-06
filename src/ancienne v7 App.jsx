@@ -91,7 +91,7 @@ const ELO_K = 32;
 const INITIAL_ELO = 1200;
 const PROFILES_KEY  = "pokerank_profiles_v1";
 const ACTIVE_KEY    = "pokerank_active_v1";
-const NAMES_FR_KEY  = "pokerank_names_fr_v3"; // bumped to force refresh of bad cached names
+const NAMES_FR_KEY  = "pokerank_names_fr_v1";
 
 // ── French names cache (localStorage) ───────────────────────────────────────
 let frNamesCache = null;
@@ -138,10 +138,9 @@ async function fetchPoke(id) {
       try {
         const sr = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${id}`);
         const sd = await sr.json();
-        // Strictly use French name from species — never fall back to English
-        frName = sd.names.find(n => n.language.name === "fr")?.name;
-        // If no French name exists at all (very rare), use capitalized raw name
-        if (!frName) frName = d.name.charAt(0).toUpperCase() + d.name.slice(1).replace(/-/g," ");
+        frName = sd.names.find(n => n.language.name === "fr")?.name
+               || sd.names.find(n => n.language.name === "en")?.name
+               || d.name;
         frCache[id] = frName;
         saveFrCache();
       } catch { frName = d.name.charAt(0).toUpperCase() + d.name.slice(1).replace(/-/g," "); }
@@ -150,6 +149,7 @@ async function fetchPoke(id) {
       id, name: frName,
       nameRaw: d.name,
       sprite: d.sprites.other["official-artwork"].front_default || d.sprites.front_default,
+      spriteAnimated: d.sprites.versions?.["generation-v"]?.["black-white"]?.animated?.front_default || null,
       types: d.types.map(t => t.type.name),
       gen: getGen(id),
       height: d.height,
@@ -321,15 +321,9 @@ function updateElo(rA, rB, scoreA) {
 }
 
 // ── Matchmaking ──────────────────────────────────────────────────────────────
-function pickOpponents(elos, totalMatches, genFilter = 0) {
-  const gen = genFilter > 0 ? GENERATIONS.find(g => g.id === genFilter) : null;
-  const allIds = gen
-    ? Array.from({ length: gen.range[1]-gen.range[0]+1 }, (_,i) => gen.range[0]+i)
-    : Array.from({ length: 1025 }, (_,i) => i+1);
-  if (allIds.length < 2) return null;
-  // For gen-filtered mode, lower cold-start threshold
-  const threshold = gen ? Math.min(10, Math.floor(allIds.length / 5)) : 20;
-  if (totalMatches < threshold || Object.keys(elos).length < 5) {
+function pickOpponents(elos, totalMatches) {
+  const allIds = Array.from({ length: 1025 }, (_, i) => i + 1);
+  if (totalMatches < 20 || Object.keys(elos).length < 10) {
     const a = allIds[Math.floor(Math.random()*allIds.length)];
     let b; do { b = allIds[Math.floor(Math.random()*allIds.length)]; } while (b===a);
     return [a,b];
@@ -1064,21 +1058,20 @@ function TinderView({ data, setData }) {
   const [swipeLabel, setSwipeLabel] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [undoFlash, setUndoFlash] = useState(false);
-  const [genFilter, setGenFilter] = useState(0);
   const touchStart = useRef(null);
   const containerRef = useRef(null);
   const { mobile, portrait } = useLayout();
   const isVertical = mobile && portrait;
 
-  const loadPair = useCallback(async (d, gen) => {
+  const loadPair = useCallback(async (d) => {
     setLoading(true);
-    const pair = pickOpponents(d.elos, d.matches, gen);
+    const pair = pickOpponents(d.elos, d.matches);
     if (!pair) { setLoading(false); return; }
     const [p1,p2] = await Promise.all([fetchPoke(pair[0]), fetchPoke(pair[1])]);
     setLeft(p1); setRight(p2); setLoading(false);
   }, []);
 
-  useEffect(() => { loadPair(data, genFilter); }, [genFilter]);
+  useEffect(() => { loadPair(data); }, []);
 
   const vote = useCallback(async (winner) => {
     if (!left || !right || swipeAnim) return;
@@ -1098,8 +1091,8 @@ function TinderView({ data, setData }) {
     };
     setData(newData);
     setUndoStack(prev => [...prev.slice(-19), snapshot]);
-    setTimeout(async () => { setSwipeAnim(null); setSwipeLabel(null); await loadPair(newData, genFilter); }, 400);
-  }, [left,right,data,swipeAnim,loadPair,setData,genFilter]);
+    setTimeout(async () => { setSwipeAnim(null); setSwipeLabel(null); await loadPair(newData); }, 400);
+  }, [left,right,data,swipeAnim,loadPair,setData]);
 
   const undo = useCallback(() => {
     if (undoStack.length===0||swipeAnim) return;
@@ -1112,9 +1105,9 @@ function TinderView({ data, setData }) {
     setTimeout(()=>setUndoFlash(false), 600);
   }, [undoStack,swipeAnim,setData]);
 
-  // Portrait: horizontal swipe only (no up/down to avoid ambiguity with scroll)
-  // Landscape: all directions
+  // Touch handling — attached to container with touch-action:none to prevent scroll interference
   const handleTouchStart = useCallback(e => {
+    // Only handle single-touch on our container
     if (e.touches.length !== 1) return;
     touchStart.current = { x:e.touches[0].clientX, y:e.touches[0].clientY };
   }, []);
@@ -1124,22 +1117,18 @@ function TinderView({ data, setData }) {
     const dx = e.changedTouches[0].clientX - touchStart.current.x;
     const dy = e.changedTouches[0].clientY - touchStart.current.y;
     const adx = Math.abs(dx), ady = Math.abs(dy);
+    // Require minimum distance of 50px to avoid accidental triggers
     if (adx < 50 && ady < 50) { touchStart.current=null; return; }
-    if (isVertical) {
-      // Portrait: horizontal swipe only — up/down handled by buttons
-      if (adx >= 50) vote(dx < 0 ? "left" : "right");
+    if (ady > adx) {
+      if (dy < -50) vote("draw");
+      else if (dy > 50) undo();
     } else {
-      // Landscape: all 4 directions
-      if (ady > adx) {
-        if (dy < -50) vote("draw");
-        else if (dy > 50) undo();
-      } else {
-        vote(dx < 0 ? "left" : "right");
-      }
+      vote(dx < 0 ? "left" : "right");
     }
     touchStart.current = null;
-  }, [vote, undo, isVertical]);
+  }, [vote, undo]);
 
+  // Prevent page scroll only within the duel zone
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -1163,9 +1152,18 @@ function TinderView({ data, setData }) {
 
   const getSwipeStyle = (side) => {
     if (!swipeAnim) return {};
-    if (swipeAnim==="up") return { transform:"translateY(-140%)", opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)" };
-    if (swipeAnim==="left"  && side==="left")  return { transform:"translateX(-140%) rotate(-15deg)", opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)" };
-    if (swipeAnim==="right" && side==="right") return { transform:"translateX(140%) rotate(15deg)",  opacity:0, transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)" };
+    if (swipeAnim==="up") return {
+      transform:"translateY(-140%)", opacity:0,
+      transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)"
+    };
+    if (swipeAnim==="left" && side==="left") return {
+      transform:"translateX(-140%) rotate(-15deg)", opacity:0,
+      transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)"
+    };
+    if (swipeAnim==="right" && side==="right") return {
+      transform:"translateX(140%) rotate(15deg)", opacity:0,
+      transition:"all 0.35s cubic-bezier(0.4,0,0.6,1)"
+    };
     return {};
   };
 
@@ -1196,7 +1194,9 @@ function TinderView({ data, setData }) {
               ? <img src={poke.sprite} alt={poke.name} style={{ width:"85%", height:"85%", objectFit:"contain" }} />
               : <div style={{ fontSize:32, color:"#ccc" }}>?</div>}
           </div>
-          <div style={{ fontSize:10, color:"#A89FC0", fontWeight:600 }}>#{String(poke?.id||"").padStart(4,"0")}</div>
+          <div style={{ fontSize:10, color:"#A89FC0", fontWeight:600, letterSpacing:"0.06em" }}>
+            #{String(poke?.id||"").padStart(4,"0")}
+          </div>
           <div style={{ fontSize:mobile?14:20, fontWeight:700, color:"#1A1025", textAlign:"center", lineHeight:1.2 }}>
             {poke?.name||"…"}
           </div>
@@ -1208,22 +1208,6 @@ function TinderView({ data, setData }) {
       </div>
     );
   };
-
-  // Gen selector bar
-  const genSelector = (
-    <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"center" }}>
-      {[0,...GENERATIONS.map(g=>g.id)].map(g=>(
-        <button key={g} onClick={()=>setGenFilter(g)} style={{
-          padding:"5px 12px", borderRadius:20, fontSize:11, fontWeight:700, cursor:"pointer",
-          border: genFilter===g ? "2px solid #6C4FDF" : "1.5px solid #E8E4F0",
-          background: genFilter===g ? "#6C4FDF" : "#fff",
-          color: genFilter===g ? "#fff" : "#6C4FDF",
-          transition:"all 0.15s" }}>
-          {g===0 ? "Tous" : `Gen ${g}`}
-        </button>
-      ))}
-    </div>
-  );
 
   const phasebar = (
     <div style={{ display:"flex", alignItems:"center", gap:12 }}>
@@ -1256,7 +1240,7 @@ function TinderView({ data, setData }) {
       fontSize: compact?11:12, fontWeight:700,
       color: undoStack.length===0?"#D0C8E8":"#B8960A",
       opacity: undoStack.length===0?0.5:1 }}>
-      ↩ Annuler
+      ↓ Annuler
     </button>
   );
   const drawBtn = (compact) => (
@@ -1268,22 +1252,26 @@ function TinderView({ data, setData }) {
     </button>
   );
 
-  const commonStyle = { touchAction:"none", userSelect:"none", WebkitUserSelect:"none" };
+  const commonContainerStyle = {
+    touchAction: "none",   // ← KEY: prevents browser scroll/zoom interfering with swipes
+    userSelect: "none",
+    WebkitUserSelect: "none",
+  };
 
   // ── PORTRAIT MOBILE ───────────────────────────────────────────────────────
   if (isVertical) {
     return (
-      <div ref={containerRef} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
-        style={{ ...commonStyle, display:"flex", flexDirection:"column",
-          alignItems:"center", padding:"10px 16px 16px", gap:8,
+      <div ref={containerRef}
+        onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
+        style={{ ...commonContainerStyle, display:"flex", flexDirection:"column",
+          alignItems:"center", padding:"12px 16px 16px", gap:8,
           minHeight:"calc(100dvh - 116px)" }}>
-        {genSelector}
         {phasebar}
         {statusLabel}
         {loading ? (
           <>
-            <div style={{ width:cardW, height:170, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />
-            <div style={{ width:cardW, height:170, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />
+            <div style={{ width:cardW, height:180, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />
+            <div style={{ width:cardW, height:180, borderRadius:20, background:"#F5F3FF", animation:"pulse 1.2s infinite" }} />
           </>
         ) : (
           <>
@@ -1301,20 +1289,20 @@ function TinderView({ data, setData }) {
           {drawBtn(false)}
         </div>
         <div style={{ fontSize:11, color:"#C0B8D8", textAlign:"center" }}>
-          Swipe ← → pour choisir
+          Swipe ← → choisir · ↑ hésiter · ↓ annuler
         </div>
         <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
       </div>
     );
   }
 
-  // ── LANDSCAPE / DESKTOP ───────────────────────────────────────────────────
+  // ── LANDSCAPE (desktop or mobile paysage) ─────────────────────────────────
   return (
-    <div ref={containerRef} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
-      style={{ ...commonStyle, display:"flex", flexDirection:"column",
+    <div ref={containerRef}
+      onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
+      style={{ ...commonContainerStyle, display:"flex", flexDirection:"column",
         alignItems:"center", padding: mobile?"12px 6px":"32px 20px",
-        gap: mobile?10:20, minHeight: mobile?"calc(100dvh - 110px)":500 }}>
-      {genSelector}
+        gap: mobile?10:28, minHeight: mobile?"calc(100dvh - 110px)":500 }}>
       {phasebar}
       {statusLabel}
       {loading ? (
@@ -1341,6 +1329,7 @@ function TinderView({ data, setData }) {
     </div>
   );
 }
+
 // ── RANKING VIEW ─────────────────────────────────────────────────────────────
 function RankingView({ data, onReset, onImport }) {
   const [genFilter, setGenFilter] = useState(0);
@@ -1406,25 +1395,15 @@ function RankingView({ data, onReset, onImport }) {
     e.target.value="";
   };
 
-  const genInfo = GENERATIONS.find(g => g.id === genFilter);
-  const totalInGen = genInfo ? (genInfo.range[1] - genInfo.range[0] + 1) : 1025;
-  const filteredRankedCount = filtered.length;
-  const rankingTitle = genFilter === 0
-    ? "Classement Global"
-    : `Classement ${genInfo?.name || `Gen ${genFilter}`}`;
-
   return (
     <div style={{ padding:"24px 24px 40px" }}>
       {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start",
         marginBottom:24, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={{ fontSize:22, fontWeight:800, color:"#1A1025" }}>{rankingTitle}</div>
+          <div style={{ fontSize:22, fontWeight:800, color:"#1A1025" }}>Classement ELO</div>
           <div style={{ fontSize:13, color:"#A89FC0", marginTop:4 }}>
-            <span style={{ color: filteredRankedCount > 0 ? "#6C4FDF" : "#A89FC0", fontWeight:700 }}>
-              {filteredRankedCount}
-            </span>
-            <span> sur {totalInGen} Pokémon classés · {data.matches} duels joués</span>
+            {rankedIds.length} Pokémon classés · {data.matches} duels joués
             {data.matches<20&&<span style={{ color:"#FF9F43", marginLeft:8 }}>⚠ Calibrage en cours</span>}
           </div>
         </div>
