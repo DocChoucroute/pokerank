@@ -1112,6 +1112,42 @@ function TinderView({ data, setData }) {
     setTimeout(()=>setUndoFlash(false), 600);
   }, [undoStack,swipeAnim,setData]);
 
+  // Portrait: horizontal swipe only (no up/down to avoid ambiguity with scroll)
+  // Landscape: all directions
+  const handleTouchStart = useCallback(e => {
+    if (e.touches.length !== 1) return;
+    touchStart.current = { x:e.touches[0].clientX, y:e.touches[0].clientY };
+  }, []);
+
+  const handleTouchEnd = useCallback(e => {
+    if (!touchStart.current || e.changedTouches.length !== 1) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current.x;
+    const dy = e.changedTouches[0].clientY - touchStart.current.y;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < 50 && ady < 50) { touchStart.current=null; return; }
+    if (isVertical) {
+      // Portrait: horizontal swipe only — up/down handled by buttons
+      if (adx >= 50) vote(dx < 0 ? "left" : "right");
+    } else {
+      // Landscape: all 4 directions
+      if (ady > adx) {
+        if (dy < -50) vote("draw");
+        else if (dy > 50) undo();
+      } else {
+        vote(dx < 0 ? "left" : "right");
+      }
+    }
+    touchStart.current = null;
+  }, [vote, undo, isVertical]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const prevent = e => e.preventDefault();
+    el.addEventListener("touchmove", prevent, { passive: false });
+    return () => el.removeEventListener("touchmove", prevent);
+  }, []);
+
   useEffect(() => {
     const h = e => {
       if (e.key==="ArrowLeft")       vote("left");
@@ -1232,12 +1268,12 @@ function TinderView({ data, setData }) {
     </button>
   );
 
-  const commonStyle = { userSelect:"none", WebkitUserSelect:"none" };
+  const commonStyle = { touchAction:"none", userSelect:"none", WebkitUserSelect:"none" };
 
   // ── PORTRAIT MOBILE ───────────────────────────────────────────────────────
   if (isVertical) {
     return (
-      <div ref={containerRef}
+      <div ref={containerRef} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
         style={{ ...commonStyle, display:"flex", flexDirection:"column",
           alignItems:"center", padding:"10px 16px 16px", gap:8,
           minHeight:"calc(100dvh - 116px)" }}>
@@ -1265,7 +1301,7 @@ function TinderView({ data, setData }) {
           {drawBtn(false)}
         </div>
         <div style={{ fontSize:11, color:"#C0B8D8", textAlign:"center" }}>
-          Boutons ou touches ← → ↑ ↓
+          Swipe ← → pour choisir
         </div>
         <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
       </div>
@@ -1274,7 +1310,7 @@ function TinderView({ data, setData }) {
 
   // ── LANDSCAPE / DESKTOP ───────────────────────────────────────────────────
   return (
-    <div ref={containerRef}
+    <div ref={containerRef} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
       style={{ ...commonStyle, display:"flex", flexDirection:"column",
         alignItems:"center", padding: mobile?"12px 6px":"32px 20px",
         gap: mobile?10:20, minHeight: mobile?"calc(100dvh - 110px)":500 }}>
