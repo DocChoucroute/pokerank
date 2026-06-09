@@ -815,130 +815,6 @@ function ResetModal({ onConfirm, onCancel, matchCount }) {
 }
 
 // ── WELCOME / PROFILE SCREEN ─────────────────────────────────────────────────
-// ── TUTORIAL ─────────────────────────────────────────────────────────────────
-const TUTORIAL_STEPS = [
-  {
-    tab: "pokedex",
-    icon: "📖",
-    title: "Le Pokédex",
-    desc: "Explore tous les Pokémon par génération. Clique sur une carte pour voir sa fiche détaillée : description, morphologie, faiblesses, résistances et chaîne d'évolution.",
-    highlight: "nav-pokedex",
-    arrow: "bottom",
-  },
-  {
-    tab: "tinder",
-    icon: "⚔️",
-    title: "Les Duels",
-    desc: "Deux Pokémon s'affrontent. Clique sur celui que tu préfères (ou utilise ← → sur clavier). Hésitation si tu ne sais pas. Plus tu joues, plus le classement est précis — tu peux filtrer par génération !",
-    highlight: "nav-tinder",
-    arrow: "bottom",
-  },
-  {
-    tab: "ranking",
-    icon: "🏆",
-    title: "Le Classement",
-    desc: "Tes Pokémon classés par score ELO, du préféré au moins aimé. Filtre par génération, exporte en image ou JSON pour partager ou changer d'appareil.",
-    highlight: "nav-ranking",
-    arrow: "bottom",
-  },
-];
-
-function Tutorial({ onFinish }) {
-  const [step, setStep] = useState(0);
-  const current = TUTORIAL_STEPS[step];
-  const isLast = step === TUTORIAL_STEPS.length - 1;
-  const { mobile } = useLayout();
-
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:999, pointerEvents:"none" }}>
-      {/* Dark overlay with cutout at bottom nav */}
-      <div style={{ position:"absolute", inset:0, background:"rgba(26,16,37,0.7)",
-        pointerEvents:"all" }} onClick={e => e.stopPropagation()} />
-
-      {/* Spotlight on bottom nav tab */}
-      <div style={{
-        position:"absolute",
-        bottom: mobile ? 0 : 8,
-        left: mobile
-          ? `${(TUTORIAL_STEPS.indexOf(current) / 3) * 100}%`
-          : "50%",
-        width: mobile ? "33.33%" : 120,
-        height: mobile ? 64 : 44,
-        borderRadius: mobile ? 0 : 12,
-        boxShadow:"0 0 0 9999px rgba(26,16,37,0.7)",
-        background:"transparent",
-        pointerEvents:"none",
-        zIndex:1,
-        transform: mobile ? "none" : "translateX(-50%)",
-      }} />
-
-      {/* Tooltip bubble */}
-      <div style={{
-        position:"absolute",
-        bottom: mobile ? 80 : 70,
-        left:"50%", transform:"translateX(-50%)",
-        width: Math.min(340, (typeof window!=="undefined"?window.innerWidth:360) - 32),
-        background:"#fff",
-        borderRadius:20,
-        padding:"24px 20px 20px",
-        boxShadow:"0 8px 40px rgba(108,79,223,0.25)",
-        pointerEvents:"all",
-        zIndex:2,
-      }}>
-        {/* Arrow pointing down */}
-        <div style={{
-          position:"absolute", bottom:-10, left:"50%", transform:"translateX(-50%)",
-          width:0, height:0,
-          borderLeft:"10px solid transparent",
-          borderRight:"10px solid transparent",
-          borderTop:"10px solid #fff",
-        }} />
-
-        {/* Step dots */}
-        <div style={{ display:"flex", justifyContent:"center", gap:6, marginBottom:16 }}>
-          {TUTORIAL_STEPS.map((_,i) => (
-            <div key={i} style={{ width:i===step?20:8, height:8, borderRadius:4,
-              background:i===step?"#6C4FDF":"#E8E4F0", transition:"all 0.3s" }} />
-          ))}
-        </div>
-
-        {/* Icon + title */}
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-          <div style={{ width:40, height:40, borderRadius:12,
-            background:"linear-gradient(135deg,#6C4FDF22,#FF5F8A22)",
-            display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>
-            {current.icon}
-          </div>
-          <div style={{ fontSize:17, fontWeight:800, color:"#1A1025" }}>{current.title}</div>
-        </div>
-
-        {/* Description */}
-        <div style={{ fontSize:13, color:"#4A3F6B", lineHeight:1.65, marginBottom:18 }}>
-          {current.desc}
-        </div>
-
-        {/* Buttons */}
-        <div style={{ display:"flex", gap:8 }}>
-          {!isLast && (
-            <button onClick={() => onFinish()} style={{
-              flex:1, padding:"10px", borderRadius:12,
-              border:"1.5px solid #E8E4F0", background:"#F8F6FF",
-              fontSize:13, fontWeight:600, color:"#A89FC0", cursor:"pointer" }}>
-              Passer
-            </button>
-          )}
-          <button onClick={() => isLast ? onFinish() : setStep(s => s+1)} style={{
-            flex:2, padding:"10px", borderRadius:12, border:"none",
-            background:"linear-gradient(135deg,#6C4FDF,#FF5F8A)",
-            fontSize:13, fontWeight:800, color:"#fff", cursor:"pointer" }}>
-            {isLast ? "C'est parti ! 🚀" : "Suivant →"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function WelcomeScreen({ onLogin }) {
   const [profiles, setProfiles] = useState(() => loadProfiles());
   const [newName, setNewName] = useState("");
@@ -952,8 +828,7 @@ function WelcomeScreen({ onLogin }) {
       setError("Ce nom est déjà pris."); return;
     }
     const id = `profile_${Date.now()}`;
-    // isNew flag triggers tutorial in App
-    const updated = { ...profiles, [id]: { id, name, data: emptyData(), createdAt: Date.now(), isNew: true } };
+    const updated = { ...profiles, [id]: { id, name, data: emptyData(), createdAt: Date.now() } };
     saveProfiles(updated);
     setProfiles(updated);
     saveActiveId(id);
@@ -1517,13 +1392,6 @@ function RankingView({ data, onReset, onImport }) {
     ? "Classement Global"
     : `Classement ${genInfo?.name || `Gen ${genFilter}`}`;
 
-  const genMatchCount = genFilter === 0
-    ? data.matches
-    : (data.history || []).filter(h => {
-        const g = GENERATIONS.find(g => h.l >= g.range[0] && h.l <= g.range[1]);
-        return g?.id === genFilter;
-      }).length;
-
   return (
     <div style={{ padding:"24px 24px 40px" }}>
       {/* Header */}
@@ -1535,8 +1403,8 @@ function RankingView({ data, onReset, onImport }) {
             <span style={{ color: filteredRankedCount > 0 ? "#6C4FDF" : "#A89FC0", fontWeight:700 }}>
               {filteredRankedCount}
             </span>
-            <span> sur {totalInGen} Pokémon classés · {genMatchCount} duels{genFilter > 0 ? ` Gen ${genFilter}` : ""} joués</span>
-            {genMatchCount<20&&<span style={{ color:"#FF9F43", marginLeft:8 }}>⚠ Calibrage en cours</span>}
+            <span> sur {totalInGen} Pokémon classés · {data.matches} duels joués</span>
+            {data.matches<20&&<span style={{ color:"#FF9F43", marginLeft:8 }}>⚠ Calibrage en cours</span>}
           </div>
         </div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -1667,7 +1535,6 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("pokedex");
   const [showReset, setShowReset] = useState(false);
-  const [showTutorial, setShowTutorial] = useState(false);
   const { mobile } = useLayout();
 
   useEffect(() => {
@@ -1677,19 +1544,6 @@ export default function App() {
       if (profiles[lastId]) setProfile(profiles[lastId]);
     }
   }, []);
-
-  const handleLogin = (p) => {
-    setProfile(p);
-    if (p.isNew) {
-      // Clear the isNew flag so tutorial only shows once
-      const profiles = loadProfiles();
-      if (profiles[p.id]) {
-        profiles[p.id].isNew = false;
-        saveProfiles(profiles);
-      }
-      setShowTutorial(true);
-    }
-  };
 
   const data = profile?.data || emptyData();
 
@@ -1705,7 +1559,7 @@ export default function App() {
   const confirmReset = () => { setData(emptyData()); setShowReset(false); };
   const handleLogout = () => { saveActiveId(""); setProfile(null); setTab("pokedex"); };
 
-  if (!profile) return <WelcomeScreen onLogin={handleLogin} />;
+  if (!profile) return <WelcomeScreen onLogin={setProfile} />;
 
   const tabs = [
     { id:"pokedex",  label:"Pokédex",    icon:"📖" },
@@ -1720,7 +1574,6 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {showReset && <ResetModal matchCount={data.matches} onConfirm={confirmReset} onCancel={()=>setShowReset(false)} />}
-      {showTutorial && <Tutorial onFinish={() => setShowTutorial(false)} />}
 
       {/* ── TOP HEADER ── */}
       <div style={{ background:"#fff", borderBottom:"1.5px solid #F0EDF8",
