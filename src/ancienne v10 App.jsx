@@ -2,15 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const GENERATIONS = [
-  { id: 1, name: "Gen 1", range: [1,   151]  },
-  { id: 2, name: "Gen 2", range: [152, 251]  },
-  { id: 3, name: "Gen 3", range: [252, 386]  },
-  { id: 4, name: "Gen 4", range: [387, 493]  },
-  { id: 5, name: "Gen 5", range: [494, 649]  },
-  { id: 6, name: "Gen 6", range: [650, 721]  },
-  { id: 7, name: "Gen 7", range: [722, 809]  },
-  { id: 8, name: "Gen 8", range: [810, 905]  },
-  { id: 9, name: "Gen 9", range: [906, 1025] },
+  { id: 1, name: "Gen I",   range: [1,   151]  },
+  { id: 2, name: "Gen II",  range: [152, 251]  },
+  { id: 3, name: "Gen III", range: [252, 386]  },
+  { id: 4, name: "Gen IV",  range: [387, 493]  },
+  { id: 5, name: "Gen V",   range: [494, 649]  },
+  { id: 6, name: "Gen VI",  range: [650, 721]  },
+  { id: 7, name: "Gen VII", range: [722, 809]  },
+  { id: 8, name: "Gen VIII",range: [810, 905]  },
+  { id: 9, name: "Gen IX",  range: [906, 1025] },
 ];
 
 const TYPE_COLORS = {
@@ -1123,38 +1123,7 @@ function TinderView({ data, setData }) {
     return ()=>window.removeEventListener("keydown",h);
   }, [vote,undo]);
 
-  // Count matches for current gen filter only
-  const genMatchCount = genFilter === 0
-    ? data.matches
-    : data.history.filter(h => {
-        const gen = GENERATIONS.find(g => h.l >= g.range[0] && h.l <= g.range[1]);
-        return gen?.id === genFilter;
-      }).length;
-
-  // Phase thresholds scale with pool size (fewer pokemon = faster calibration)
-  const poolSize = genFilter === 0 ? 1025
-    : (() => { const g = GENERATIONS.find(g => g.id === genFilter); return g ? g.range[1]-g.range[0]+1 : 1025; })();
-  const t1 = Math.round(poolSize * 0.05);   // Découverte
-  const t2 = Math.round(poolSize * 0.15);   // Calibrage
-  const t3 = Math.round(poolSize * 0.35);   // Affinage
-  const t4 = Math.round(poolSize * 0.70);   // Précision
-  const phase =
-    genMatchCount < t1 ? "Découverte" :
-    genMatchCount < t2 ? "Calibrage"  :
-    genMatchCount < t3 ? "Affinage"   :
-    genMatchCount < t4 ? "Précision"  : "Maître";
-
-  const phasebar = (
-    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-      <div style={{ fontSize:12, color:"#A89FC0", fontWeight:500 }}>
-        {genMatchCount} duels{genFilter > 0 ? ` Gen ${genFilter}` : ""} · <span style={{ color:"#6C4FDF", fontWeight:700 }}>{phase}</span>
-      </div>
-      <div style={{ width:80, height:4, background:"#F0EDF8", borderRadius:4, overflow:"hidden" }}>
-        <div style={{ height:"100%", width:`${Math.min(100,(genMatchCount/t4)*100)}%`,
-          background:"linear-gradient(90deg,#6C4FDF,#FF5F8A)", borderRadius:4 }} />
-      </div>
-    </div>
-  );
+  const phase = data.matches<20?"Découverte":data.matches<60?"Calibrage":"Affinage";
 
   const getSwipeStyle = (side) => {
     if (!swipeAnim) return {};
@@ -1212,6 +1181,18 @@ function TinderView({ data, setData }) {
           {g===0 ? "Tous" : `Gen ${g}`}
         </button>
       ))}
+    </div>
+  );
+
+  const phasebar = (
+    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+      <div style={{ fontSize:12, color:"#A89FC0", fontWeight:500 }}>
+        {data.matches} duels · <span style={{ color:"#6C4FDF", fontWeight:700 }}>{phase}</span>
+      </div>
+      <div style={{ width:80, height:4, background:"#F0EDF8", borderRadius:4, overflow:"hidden" }}>
+        <div style={{ height:"100%", width:`${Math.min(100,(data.matches/60)*100)}%`,
+          background:"linear-gradient(90deg,#6C4FDF,#FF5F8A)", borderRadius:4 }} />
+      </div>
     </div>
   );
 
